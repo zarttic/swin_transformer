@@ -1,61 +1,37 @@
-import os
-import json
-
-import torch
 from PIL import Image
-from torchvision import transforms
-import matplotlib.pyplot as plt
-
-from model import swin_tiny_patch4_window7_224 as create_model
+import torch
+from torch.utils.data import Dataset
 
 
-def main():
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+class MyDataSet(Dataset):
+    """自定义数据集"""
 
-    img_size = 224
-    data_transform = transforms.Compose(
-        [transforms.Resize(int(img_size * 1.14)),
-         transforms.CenterCrop(img_size),
-         transforms.ToTensor(),
-         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    def __init__(self, images_path: list, images_class: list, transform=None):
+        self.images_path = images_path
+        self.images_class = images_class
+        self.transform = transform
 
-    # load image
-    img_path = "../tulip.jpg"
-    assert os.path.exists(img_path), "file: '{}' dose not exist.".format(img_path)
-    img = Image.open(img_path)
-    plt.imshow(img)
-    # [N, C, H, W]
-    img = data_transform(img)
-    # expand batch dimension
-    img = torch.unsqueeze(img, dim=0)
+    def __len__(self):
+        return len(self.images_path)
 
-    # read class_indict
-    json_path = './class_indices.json'
-    assert os.path.exists(json_path), "file: '{}' dose not exist.".format(json_path)
+    def __getitem__(self, item):
+        img = Image.open(self.images_path[item])
+        # RGB为彩色图片，L为灰度图片
+        if img.mode != 'RGB':
+            raise ValueError("image: {} isn't RGB mode.".format(self.images_path[item]))
+        label = self.images_class[item]
 
-    with open(json_path, "r") as f:
-        class_indict = json.load(f)
+        if self.transform is not None:
+            img = self.transform(img)
 
-    # create model
-    model = create_model(num_classes=5).to(device)
-    # load model weights
-    model_weight_path = "./weights/model-9.pth"
-    model.load_state_dict(torch.load(model_weight_path, map_location=device))
-    model.eval()
-    with torch.no_grad():
-        # predict class
-        output = torch.squeeze(model(img.to(device))).cpu()
-        predict = torch.softmax(output, dim=0)
-        predict_cla = torch.argmax(predict).numpy()
+        return img, label
 
-    print_res = "class: {}   prob: {:.3}".format(class_indict[str(predict_cla)],
-                                                 predict[predict_cla].numpy())
-    plt.title(print_res)
-    for i in range(len(predict)):
-        print("class: {:10}   prob: {:.3}".format(class_indict[str(i)],
-                                                  predict[i].numpy()))
-    plt.show()
+    @staticmethod
+    def collate_fn(batch):
+        # 官方实现的default_collate可以参考
+        # https://github.com/pytorch/pytorch/blob/67b7e751e6b5931a9f45274653f4f653a4e6cdf6/torch/utils/data/_utils/collate.py
+        images, labels = tuple(zip(*batch))
 
-
-if __name__ == '__main__':
-    main()
+        images = torch.stack(images, dim=0)
+        labels = torch.as_tensor(labels)
+        return images, labels
